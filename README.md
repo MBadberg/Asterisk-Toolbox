@@ -32,6 +32,12 @@ Dieses Skript automatisiert die vollständige Installation und Konfiguration ein
 - tel.quick SIP-Trunk Zugangsdaten (SIP-Benutzername, Passwort, Rufnummer)
 - Verfügbare Container-ID und ausreichend Speicherplatz
 
+**⚠️ Sicherheitshinweis:**
+- Verwenden Sie starke, einzigartige Passwörter für alle Konfigurationen
+- Schützen Sie das Skript vor unbefugtem Zugriff (Dateiberechtigungen: `chmod 600`)
+- Erwägen Sie die Verwendung von SSH-Schlüsseln statt Passwörtern für Proxmox
+- Die im Skript gezeigten Passwörter sind nur Beispiele und müssen durch sichere Passwörter ersetzt werden
+
 **Konfiguration:**
 
 Vor der Ausführung müssen folgende Variablen im Skript angepasst werden:
