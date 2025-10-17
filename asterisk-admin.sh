@@ -35,24 +35,30 @@ reload_asterisk() {
   $AST_CLI "sip reload" >/dev/null 2>&1 || true
 }
 
+# Liste der Nebenstellen aus sip.conf ermitteln (ohne {m,n}-Quantifier in RegEx)
 list_extensions() {
-  # Liefert "ext name" pro Zeile; Name aus callerid-Attribut, sonst "-"
   awk '
     BEGIN{inblk=0; ext=""; name="-"; tf=0; hd=0}
-    /^\[[0-9]{2,4}\]$/ {
-      if (inblk && tf && hd && ext!="") { print ext " " name }
-      match($0, /^\[([0-9]{2,4})\]$/, m)
-      ext=m[1]; name="-"; inblk=1; tf=0; hd=0; next
-    }
+    # Jeder neue Abschnitt: vorherigen ggf. ausgeben
     /^\[/ {
       if (inblk && tf && hd && ext!="") { print ext " " name }
-      inblk=0; ext=""; name="-"; tf=0; hd=0; next
+      inblk=0; tf=0; hd=0; ext=""; name="-"
     }
+    # Abschnitt [<digits>] erkennen und Länge prüfen (2..4)
+    /^\[[0-9]+\]$/ {
+      if (match($0, /^\[([0-9]+)\]$/, m)) {
+        ext=m[1]
+        if (length(ext)>=2 && length(ext)<=4) { inblk=1 } else { inblk=0; ext="" }
+      }
+      next
+    }
+    # Kriterien für „echte“ Nebenstelle
     inblk && $0 ~ /^[[:space:]]*type[[:space:]]*=[[:space:]]*friend/ { tf=1; next }
     inblk && $0 ~ /^[[:space:]]*host[[:space:]]*=[[:space:]]*dynamic/ { hd=1; next }
     inblk && $0 ~ /^[[:space:]]*callerid[[:space:]]*=/ {
-      match($0,/callerid[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*<([0-9]+)>/,m)
-      if (m[1]!="") name=m[1]
+      if (match($0,/callerid[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*<([0-9]+)>/,m2)) {
+        if (m2[1]!="") name=m2[1]
+      }
       next
     }
     END{ if (inblk && tf && hd && ext!="") { print ext " " name } }
@@ -206,19 +212,30 @@ EOFCALLHELP
   fi
 }
 
+# Ersetzt die Dial-Zeile im internen Block für EXT durch Local/EXT@calltoext
 internal_use_local_helper_for_ext() {
   local ext="$1"
   backup "$EXT_CONF"
   awk -v EXT="$ext" '
-  BEGIN{sect=0; inblk=0}
+  BEGIN{sect=0; inblk=0; replaced=0}
   /^\[internal\]$/ { print; sect=1; next }
   /^\[/ { print; if ($0!="[internal]") { sect=0 }; inblk=0; next }
   {
     if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) { print; inblk=1; next }
-    if (sect && inblk && /Dial\(/) {
-      print " same => n,Dial(Local/"EXT"@calltoext,30,rtT)"; next
+    if (sect && inblk) {
+      if ($0 ~ /Dial\(/) {
+        print " same => n,Dial(Local/"EXT"@calltoext,30,rtT)"
+        replaced=1
+        next
+      }
     }
     print
+  }
+  END{
+    # Falls keine Dial-Zeile existierte, fügen wir eine sinnvolle hinzu
+    if (sect && inblk && !replaced) {
+      print " same => n,Dial(Local/"EXT"@calltoext,30,rtT)"
+    }
   }
   ' "$EXT_CONF" > "${EXT_CONF}.new" && mv "${EXT_CONF}.new" "$EXT_CONF"
 }
@@ -243,6 +260,7 @@ ringgroup_set_members() {
       echo "Warnung: Nebenstelle $e existiert nicht, wird übersprungen."
       continue
     fi
+    ensure_calltoext_helper
     internal_use_local_helper_for_ext "$e"
     if [ -z "$dial_targets" ]; then
       dial_targets="Local/${e}@calltoext"
