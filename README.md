@@ -131,6 +131,101 @@ pct exec <LXC_ID> -- tail -f /var/log/asterisk/messages
 
 ---
 
+### 2. asterisk-admin.sh
+
+**Beschreibung:**  
+Dieses Skript ist ein interaktives Menü-Tool zur Administration eines bereits installierten Asterisk-Servers. Es ermöglicht die Verwaltung von Anrufbeantwortern, Ringgruppen und Anrufverhalten (Call-Waiting) für einzelne Nebenstellen.
+
+**Hauptfunktionen:**
+- **Anrufbeantworter (Voicemail):** Ein-/Ausschalten der Voicemail-Funktion für einzelne Nebenstellen mit PIN-Verwaltung
+- **Ringgruppen bearbeiten:** Konfiguration der Ringgruppe, welche Nebenstellen bei eingehenden Anrufen klingeln sollen
+- **Call-Waiting (Klopfen):** Aktivierung/Deaktivierung der Anklopf-Funktion für einzelne oder alle Nebenstellen
+
+**Voraussetzungen:**
+- Funktionierender Asterisk-Server mit chan_sip Konfiguration
+- Root-Zugriff auf dem Asterisk-Server (LXC-Container oder dedizierter Server)
+- Vorhandene Konfigurationsdateien:
+  - `/etc/asterisk/sip.conf`
+  - `/etc/asterisk/extensions.conf`
+  - `/etc/asterisk/voicemail.conf` (wird automatisch erstellt, falls nicht vorhanden)
+
+**Installation:**
+
+1. Skript auf den Asterisk-Server kopieren (z.B. via SCP):
+   ```bash
+   scp asterisk-admin.sh root@<asterisk-server-ip>:/root/
+   ```
+
+2. Ausführbar machen:
+   ```bash
+   chmod +x /root/asterisk-admin.sh
+   ```
+
+**Verwendung:**
+
+Direkt auf dem Asterisk-Server als Root ausführen:
+```bash
+cd /root
+./asterisk-admin.sh
+```
+
+Das Skript präsentiert ein interaktives Menü:
+
+```
+Asterisk Admin (V7 Post-Install)
+--------------------------------
+1) Anrufbeantworter einstellen
+2) Ringgruppen bearbeiten
+3) Anrufverhalten: Call-Waiting (Klopfen) ein/aus
+q) Beenden
+```
+
+**Funktionsübersicht:**
+
+**1. Anrufbeantworter einstellen:**
+- Zeigt alle konfigurierten Nebenstellen an
+- Ermöglicht das Einschalten der Voicemail mit PIN-Konfiguration
+- Deaktiviert die Voicemail für ausgewählte Nebenstellen
+- Automatische Backup-Erstellung vor jeder Änderung
+
+**2. Ringgruppen bearbeiten:**
+- Zeigt die aktuelle Ringgruppen-Konfiguration
+- Ermöglicht Neukonfiguration der Mitglieder (kommaseparierte Liste)
+- Integriert automatisch Helper-Contexts für Call-Waiting-Unterstützung
+- Validiert, dass nur existierende Nebenstellen hinzugefügt werden
+
+**3. Call-Waiting (Klopfen):**
+- Zeigt den aktuellen Call-Waiting-Status aller Nebenstellen
+- Ermöglicht Einstellung für einzelne Nebenstellen (on/off)
+- Ermöglicht globale Einstellung für alle Nebenstellen
+- Verwendet Asterisk Database (AstDB) zur Speicherung der Einstellungen
+
+**Sicherheit:**
+- Erstellt automatisch Backups aller Konfigurationsdateien vor Änderungen
+- Backup-Format: `<datei>.bak.YYYYMMDD-HHMMSS`
+- Validiert Eingaben vor dem Schreiben in Konfigurationsdateien
+- Führt nach jeder Änderung automatisch `dialplan reload` und `sip reload` aus
+
+**Hinweise:**
+- Das Skript arbeitet nur mit chan_sip (nicht PJSIP)
+- Alle Änderungen werden sofort aktiv (automatisches Reload)
+- Backups werden im gleichen Verzeichnis wie die Originaldateien erstellt
+- Bei Fehlern können die Original-Dateien aus den Backups wiederhergestellt werden
+
+**Integration mit create-asterisk-lxc-telquick.sh:**
+
+Dieses Admin-Tool ist speziell für die Nachkonfiguration von Asterisk-Servern gedacht, die mit dem `create-asterisk-lxc-telquick.sh`-Skript erstellt wurden. Es kann aber auch auf anderen Asterisk-Installationen mit chan_sip verwendet werden.
+
+**Beispiel-Workflow:**
+
+1. Asterisk-Server mit `create-asterisk-lxc-telquick.sh` erstellen
+2. `asterisk-admin.sh` auf den Container kopieren
+3. Anrufbeantworter für bestimmte Nebenstellen aktivieren
+4. Ringgruppe anpassen (z.B. nur Büro-Telefone)
+5. Call-Waiting für einzelne Nebenstellen deaktivieren (z.B. für Empfang)
+
+---
+
 ## Lizenz
 
 Dieses Projekt steht zur freien Verfügung.
