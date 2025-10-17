@@ -5,6 +5,7 @@ Eine Sammlung nützlicher Skripte rund um Asterisk.
 ## Übersicht
 
 Diese Toolbox enthält verschiedene Skripte zur Automatisierung und Vereinfachung von Asterisk-Deployments und -Konfigurationen.
+Für alle, die ein simples Setup, ohne WebUI wollen!
 
 ---
 
