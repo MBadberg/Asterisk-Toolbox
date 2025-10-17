@@ -7,8 +7,8 @@ set -euo pipefail
 # - Call-Waiting (Klopfen) je Nebenstelle ein/aus via AstDB
 #
 # Ausführung direkt im LXC-Container als root:
-#   chmod +x asterisk-admin.sh
-#   ./asterisk-admin.sh
+#   chmod +x /root/asterisk-admin.sh
+#   /root/asterisk-admin.sh
 
 SIP_CONF="/etc/asterisk/sip.conf"
 EXT_CONF="/etc/asterisk/extensions.conf"
@@ -38,16 +38,24 @@ reload_asterisk() {
 list_extensions() {
   # Liefert "ext name" pro Zeile; Name aus callerid-Attribut, sonst "-"
   awk '
-    BEGIN{ext="";name="-";in=0}
-    /^\[[0-9]{2,4}\]$/ { if(in && ext!=""){print ext " " name}; ext=gensub(/^\[|\]$/,"","g"); name="-"; in=1; next }
-    /^\[/ { if(in && ext!=""){print ext " " name}; in=0; ext=""; name="-"; next }
-    in && $0 ~ /^[[:space:]]*type[[:space:]]*=[[:space:]]*friend/ { in=1 }
-    in && $0 ~ /^[[:space:]]*host[[:space:]]*=[[:space:]]*dynamic/ { in=1 }
-    in && $0 ~ /^[[:space:]]*callerid[[:space:]]*=/ {
-      match($0,/callerid[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*<([0-9]+)>/,m);
-      if(m[1]!=""){name=m[1]}
+    BEGIN{inblk=0; ext=""; name="-"; tf=0; hd=0}
+    /^\[[0-9]{2,4}\]$/ {
+      if (inblk && tf && hd && ext!="") { print ext " " name }
+      match($0, /^\[([0-9]{2,4})\]$/, m)
+      ext=m[1]; name="-"; inblk=1; tf=0; hd=0; next
     }
-    END{ if(in && ext!=""){print ext " " name} }
+    /^\[/ {
+      if (inblk && tf && hd && ext!="") { print ext " " name }
+      inblk=0; ext=""; name="-"; tf=0; hd=0; next
+    }
+    inblk && $0 ~ /^[[:space:]]*type[[:space:]]*=[[:space:]]*friend/ { tf=1; next }
+    inblk && $0 ~ /^[[:space:]]*host[[:space:]]*=[[:space:]]*dynamic/ { hd=1; next }
+    inblk && $0 ~ /^[[:space:]]*callerid[[:space:]]*=/ {
+      match($0,/callerid[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*<([0-9]+)>/,m)
+      if (m[1]!="") name=m[1]
+      next
+    }
+    END{ if (inblk && tf && hd && ext!="") { print ext " " name } }
   ' "$SIP_CONF" | sort -n
 }
 
@@ -83,7 +91,6 @@ add_or_update_vm_entry() {
   ensure_vm_conf
   backup "$VM_CONF"
   if vm_entry_exists "$ext"; then
-    # update Zeile (PIN/Name)
     sed -i -E "s|^[[:space:]]*${ext}[[:space:]]*=>.*|${ext} => ${pin},${name},,|g" "$VM_CONF"
   else
     echo "${ext} => ${pin},${name},," >> "$VM_CONF"
@@ -98,17 +105,16 @@ remove_vm_entry() {
 
 sip_set_mailbox() {
   local ext="$1"
-  # mailbox=ext@default im Peer-Block hinzufügen, wenn nicht vorhanden
   backup "$SIP_CONF"
   awk -v EXT="$ext" '
-  BEGIN{in=0; have=0}
+  BEGIN{inblk=0; have=0}
   {
-    if ($0 ~ ("^\\["EXT"\\]$")) {print; in=1; have=0; next}
-    if (in && $0 ~ /^\\[/) { if (!have) print "mailbox="EXT"@default"; in=0 }
-    if (in && $0 ~ /^[[:space:]]*mailbox[[:space:]]*=/) { print "mailbox="EXT"@default"; have=1; next }
+    if ($0 ~ ("^\\["EXT"\\]$")) { print; inblk=1; have=0; next }
+    if (inblk && $0 ~ /^\\[/) { if (!have) print "mailbox="EXT"@default"; inblk=0 }
+    if (inblk && $0 ~ /^[[:space:]]*mailbox[[:space:]]*=/) { print "mailbox="EXT"@default"; have=1; next }
     print
   }
-  END{ if (in && !have) print "mailbox="EXT"@default" }
+  END{ if (inblk && !have) print "mailbox="EXT"@default" }
   ' "$SIP_CONF" > "${SIP_CONF}.new" && mv "${SIP_CONF}.new" "$SIP_CONF"
 }
 
@@ -116,11 +122,11 @@ sip_remove_mailbox() {
   local ext="$1"
   backup "$SIP_CONF"
   awk -v EXT="$ext" '
-  BEGIN{in=0}
+  BEGIN{inblk=0}
   {
-    if ($0 ~ ("^\\["EXT"\\]$")) {print; in=1; next}
-    if (in && $0 ~ /^\\[/) {in=0}
-    if (in && $0 ~ /^[[:space:]]*mailbox[[:space:]]*=/) {next}
+    if ($0 ~ ("^\\["EXT"\\]$")) { print; inblk=1; next }
+    if (inblk && $0 ~ /^\\[/) { inblk=0 }
+    if (inblk && $0 ~ /^[[:space:]]*mailbox[[:space:]]*=/) { next }
     print
   }
   ' "$SIP_CONF" > "${SIP_CONF}.new" && mv "${SIP_CONF}.new" "$SIP_CONF"
@@ -129,11 +135,11 @@ sip_remove_mailbox() {
 ext_block_has_vmline() {
   local ext="$1"
   awk -v EXT="$ext" '
-  BEGIN{in=0;have=0}
-  $0 ~ ("^\\[internal\\]$"){sect=1; next}
-  $0 ~ /^\[/{ if (sect && in) exit; if ($0=="[internal]") sect=1; else sect=0; in=0}
-  sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT","){in=1}
-  in && $0 ~ /Voicemail\(/ {have=1}
+  BEGIN{sect=0; inblk=0; have=0}
+  /^\[internal\]$/ {sect=1; next}
+  /^\[/ { if (sect && inblk) exit; if ($0=="[internal]") {sect=1} else {sect=0}; inblk=0 }
+  sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT","){ inblk=1 }
+  inblk && /Voicemail\(/ { have=1 }
   END{ if(have) exit 0; else exit 1 }
   ' "$EXT_CONF"
 }
@@ -142,15 +148,18 @@ ext_add_vmline_after_dial() {
   local ext="$1"
   backup "$EXT_CONF"
   awk -v EXT="$ext" '
-  BEGIN{in=0; added=0}
+  BEGIN{sect=0; inblk=0; added=0}
+  /^\[internal\]$/ { print; sect=1; next }
+  /^\[/ {
+    if (sect && inblk && !added) { print " same => n,Voicemail("EXT"@default,u)"; added=1 }
+    print; if ($0!="[internal]") { sect=0 }; inblk=0; next
+  }
   {
-    if ($0 ~ /^\[internal\]$/){print; sect=1; next}
-    if ($0 ~ /^\[/){ if(sect && in && !added){print " same => n,Voicemail("EXT"@default,u)"; added=1} print; if($0!="[internal]") sect=0; in=0; next}
-    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) {print; in=1; next}
-    if (sect && in && $0 ~ /Dial\(/) {print; if(!added){print " same => n,Voicemail("EXT"@default,u)"; added=1}; next}
+    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) { print; inblk=1; next }
+    if (sect && inblk && /Dial\(/) { print; if (!added) { print " same => n,Voicemail("EXT"@default,u)"; added=1 }; next }
     print
   }
-  END{ if(sect && in && !added) print " same => n,Voicemail("EXT"@default,u)" }
+  END{ if (sect && inblk && !added) print " same => n,Voicemail("EXT"@default,u)" }
   ' "$EXT_CONF" > "${EXT_CONF}.new" && mv "${EXT_CONF}.new" "$EXT_CONF"
 }
 
@@ -158,19 +167,18 @@ ext_remove_vmline() {
   local ext="$1"
   backup "$EXT_CONF"
   awk -v EXT="$ext" '
-  BEGIN{sect=0; in=0}
+  BEGIN{sect=0; inblk=0}
+  /^\[internal\]$/ { print; sect=1; next }
+  /^\[/ { print; if ($0!="[internal]") { sect=0 }; inblk=0; next }
   {
-    if ($0 ~ /^\[internal\]$/){print; sect=1; next}
-    if ($0 ~ /^\[/){ print; if($0!="[internal]") sect=0; in=0; next}
-    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) {print; in=1; next}
-    if (sect && in && $0 ~ /Voicemail\(/) { next }
+    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) { print; inblk=1; next }
+    if (sect && inblk && /Voicemail\(/) { next }
     print
   }
   ' "$EXT_CONF" > "${EXT_CONF}.new" && mv "${EXT_CONF}.new" "$EXT_CONF"
 }
 
 ensure_calltoext_helper() {
-  # Fügt [calltoext] + [vm] ein, falls nicht vorhanden
   if ! grep -q '^\[calltoext\]' "$EXT_CONF"; then
     backup "$EXT_CONF"
     cat >> "$EXT_CONF" <<'EOFCALLHELP'
@@ -201,16 +209,14 @@ EOFCALLHELP
 internal_use_local_helper_for_ext() {
   local ext="$1"
   backup "$EXT_CONF"
-  # Ersetze Dial(SIP/<ext>,...) -> Dial(Local/<ext>@calltoext,30,rtT)
   awk -v EXT="$ext" '
-  BEGIN{sect=0; in=0}
+  BEGIN{sect=0; inblk=0}
+  /^\[internal\]$/ { print; sect=1; next }
+  /^\[/ { print; if ($0!="[internal]") { sect=0 }; inblk=0; next }
   {
-    if ($0 ~ /^\[internal\]$/){print; sect=1; next}
-    if ($0 ~ /^\[/){ print; if($0!="[internal]") sect=0; in=0; next}
-    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) {print; in=1; next}
-    if (sect && in && $0 ~ /Dial\(/) {
-      gsub(/Dial\\(SIP\\/[0-9]+,.*\\)/, "Dial(Local/"EXT"@calltoext,30,rtT)")
-      print; next
+    if (sect && $0 ~ ("^exten[[:space:]]*=>[[:space:]]*"EXT",")) { print; inblk=1; next }
+    if (sect && inblk && /Dial\(/) {
+      print " same => n,Dial(Local/"EXT"@calltoext,30,rtT)"; next
     }
     print
   }
@@ -219,10 +225,10 @@ internal_use_local_helper_for_ext() {
 
 ringgroup_get_dial_line() {
   awk '
-  BEGIN{in=0}
-  /^\[ringall\]$/ {in=1; next}
-  /^\[/ { if(in) exit }
-  in && $0 ~ /Dial\(/ {print; exit}
+  BEGIN{inblk=0}
+  /^\[ringall\]$/ { inblk=1; next }
+  /^\[/ { if(inblk) exit }
+  inblk && /Dial\(/ { print; exit }
   ' "$EXT_CONF"
 }
 
@@ -237,7 +243,6 @@ ringgroup_set_members() {
       echo "Warnung: Nebenstelle $e existiert nicht, wird übersprungen."
       continue
     fi
-    # Stelle sicher, dass interne Wahl auch Helper nutzt
     internal_use_local_helper_for_ext "$e"
     if [ -z "$dial_targets" ]; then
       dial_targets="Local/${e}@calltoext"
@@ -248,22 +253,16 @@ ringgroup_set_members() {
   [ -z "$dial_targets" ] && { echo "Keine gültigen Nebenstellen angegeben."; return 1; }
 
   backup "$EXT_CONF"
-  # Ersetze die Dial-Zeile in [ringall]
   awk -v NEWDIAL="$dial_targets" '
-  BEGIN{in=0; done=0}
+  BEGIN{inblk=0; done=0}
+  /^\[ringall\]$/ { print; inblk=1; next }
+  /^\[/ { if(inblk){ inblk=0 } }
   {
-    if ($0 ~ /^\[ringall\]$/){print; in=1; next}
-    if (in && $0 ~ /^\[/) {in=0}
-    if (in && $0 ~ /Dial\(/) {
-      print " same => n,Dial("NEWDIAL",30,rtT)"; done=1; next
-    }
+    if (inblk && /Dial\(/) { print " same => n,Dial("NEWDIAL",30,rtT)"; done=1; next }
     print
   }
   END{
-    # Falls keine Dial-Zeile existierte, fügen wir eine hinzu
-    if(in && !done){
-      print " same => n,Dial("NEWDIAL",30,rtT)"
-    }
+    if (inblk && !done) { print " same => n,Dial("NEWDIAL",30,rtT)" }
   }
   ' "$EXT_CONF" > "${EXT_CONF}.new" && mv "${EXT_CONF}.new" "$EXT_CONF"
 }
@@ -303,7 +302,6 @@ menu_vm() {
     [ -z "$pin" ] && { echo "Abgebrochen."; pause; return; }
     add_or_update_vm_entry "$sel_ext" "$pin" "$sel_name"
     sip_set_mailbox "$sel_ext"
-    # Sicherstellen, dass im internen Block eine Voicemail-Zeile vorhanden ist
     if ! ext_block_has_vmline "$sel_ext"; then
       ext_add_vmline_after_dial "$sel_ext"
     fi
