@@ -32,6 +32,8 @@ Dieses Skript automatisiert die vollständige Installation und Konfiguration ein
 - `sshpass` auf dem ausführenden System installiert
 - tel.quick SIP-Trunk Zugangsdaten (SIP-Benutzername, Passwort, Rufnummer)
 - Verfügbare Container-ID und ausreichend Speicherplatz
+- UDP Port 5060 Portweiterleitung auf Container IP
+- UDP Ports 10000-10300 Portweiterleitung auf Container IP
 
 **⚠️ Sicherheitshinweis:**
 - Verwenden Sie starke, einzigartige Passwörter für alle Konfigurationen
