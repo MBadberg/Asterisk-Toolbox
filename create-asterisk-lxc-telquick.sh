@@ -62,7 +62,7 @@ PHONES=(
 CODECS="alaw,ulaw"  # g729 nur wenn lizenziert
 
 # NAT-Einstellungen
-# Falls DynDNS genutzt wird, EXTERNAL_HOST setzen (z.B. palais.srv64.de)
+# Falls DynDNS genutzt wird, EXTERNAL_HOST setzen (z.B. dyndns.srv64.de)
 EXTERNAL_HOST=""                      # DynDNS Hostname
 EXTERNAL_IP=""                        # statische externe IP (leer lassen, wenn EXTERNAL_HOST genutzt wird)
 EXTERNAL_REFRESH="300"                # externhost Refresh-Sekunden (empfohlen 300)
