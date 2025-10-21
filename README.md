@@ -7,6 +7,14 @@ Eine Sammlung nützlicher Skripte rund um Asterisk.
 Diese Toolbox enthält verschiedene Skripte zur Automatisierung und Vereinfachung von Asterisk-Deployments und -Konfigurationen.
 Für alle, die ein simples Setup, ohne WebUI wollen!
 
+### Inhaltsverzeichnis
+
+- [Verfügbare Skripte](#verfügbare-skripte)
+  - [create-asterisk-lxc-telquick.sh](#1-create-asterisk-lxc-telquicksh)
+  - [asterisk-admin.sh](#2-asterisk-adminsh)
+- [Lizenz](#lizenz)
+- [Beiträge](#beiträge)
+
 ---
 
 ## Verfügbare Skripte
